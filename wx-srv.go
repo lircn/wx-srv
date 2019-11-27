@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sort"
@@ -13,20 +14,21 @@ const (
 )
 
 func CheckSign(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "req: %s\n", r.URL.Path)
 	signature := r.URL.Query().Get("signature")
 	timestamp := r.URL.Query().Get("timestamp")
 	nonce := r.URL.Query().Get("nonce")
 
 	token := TOKEN
 	tmpArr := []string{token, timestamp, nonce}
+
 	sort.Strings(tmpArr)
 	tmpStr := strings.Join(tmpArr, "")
+
 	h := sha1.New()
 	h.Write([]byte(tmpStr))
-	tmpStr = string(h.Sum(nil))
+	sha := hex.EncodeToString(h.Sum(nil))
 
-	if tmpStr == signature {
+	if sha == signature {
 		w.Write([]byte(r.URL.Query().Get("echostr")))
 	} else {
 		w.Write([]byte("error"))
@@ -34,6 +36,7 @@ func CheckSign(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/check_sign", CheckSign)
+	http.HandleFunc("/", CheckSign)
 	http.ListenAndServe(":10419", nil)
+	fmt.Println("lir wx server start.")
 }
