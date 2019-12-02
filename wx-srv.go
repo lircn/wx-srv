@@ -20,6 +20,8 @@ var log = logrus.New()
 var c = cache.New(5*time.Minute, 10*time.Minute)
 
 func main() {
+	//test()
+	//return
 
 	filename := LOG_FILENAME
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0666)
@@ -42,6 +44,8 @@ func main() {
 			log.Infof("unexpected req: %s\n", r.Method)
 		}
 	})
+
+	log.Infof("access token: %s\n", GetAccessToken())
 
 	http.ListenAndServe(":10419", nil)
 }
