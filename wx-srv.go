@@ -30,6 +30,7 @@ func main() {
 	} else {
 		log.WithError(err).Warnln("Failed to log to file, using default stderr")
 	}
+	defer file.Close()
 	log.Infoln("lir wx server start.")
 
 	log.SetLevel(logrus.DebugLevel)

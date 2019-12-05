@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,13 +29,23 @@ type reqMessage struct {
 	Event        string `xml:"Event"`
 }
 
+type articleContent struct {
+	XMLName     xml.Name `xml:"item"`
+	Title       string   `xml:"Title"`
+	Description string   `xml:"Description"`
+	PicUrl      string   `xml:""`
+	Url         string   `xml:"Url"`
+}
+
 type repMessage struct {
-	XMLName      xml.Name
-	ToUserName   string `xml:"ToUserName"`
-	FromUserName string `xml:"FromUserName"`
-	CreateTime   int64  `xml:"CreateTime"`
-	MsgType      string `xml:"MsgType"`
-	Content      string `xml:"Content"`
+	XMLName      xml.Name         `xml:"xml"`
+	ToUserName   string           `xml:"ToUserName"`
+	FromUserName string           `xml:"FromUserName"`
+	CreateTime   int64            `xml:"CreateTime"`
+	MsgType      string           `xml:"MsgType"`
+	Content      string           `xml:"Content"`
+	ArticleCount int              `xml:"ArticleCount"`
+	Articles     []articleContent `xml:"Articles>item"`
 }
 
 const (
@@ -41,6 +54,8 @@ const (
 	AIChatAppKey = "p67sMgph5IUiomcH"
 
 	HeadAgent = "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:60.0) Gecko/20100101 Firefox/60.0"
+
+	ApiHttpTimeout = time.Second * 3
 )
 
 var (
@@ -51,8 +66,9 @@ var (
 	msgHelp = `1. 回复“手气”测试手气
 2. 回复“主页”获取主页链接
 3. 回复“彩虹屁”挨夸
-4. 回复“垃圾 xx”查询xx是什么垃圾类型
-5. 或者直接聊天~`
+4. 回复“土味”享受惊喜
+5. 回复“垃圾 xx”查询xx是什么垃圾类型
+6. 或者直接聊天~`
 	msgHome = "http://blog.zaynli.com"
 )
 
@@ -131,8 +147,26 @@ var slotMachMap = map[int32]string{
 	7: "🚗",
 }
 
+var tuweiList []string
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
+
+	file, err := os.Open("tuwei.db")
+	if err != nil {
+		log.WithError(err).Warnln("Failed to open tuwei")
+		return
+	}
+	defer file.Close()
+
+	br := bufio.NewReader(file)
+	for {
+		a, _, c := br.ReadLine()
+		if c == io.EOF {
+			break
+		}
+		tuweiList = append(tuweiList, string(a))
+	}
 }
 
 func handleMsgTextLucky(reqMsg *reqMessage) []byte {
@@ -177,6 +211,7 @@ func aiGetReqSign(params map[string]string) string {
 }
 
 func aiChat(session string, in string) string {
+	errorStr := "突然有点不想聊天"
 	params := map[string]string{
 		"app_id":     AIChatAppId,
 		"session":    session,
@@ -190,7 +225,7 @@ func aiChat(session string, in string) string {
 	req, err := http.NewRequest(http.MethodGet, URL, nil)
 	if err != nil {
 		log.WithError(err).Warnln("Can't make ai req")
-		return ""
+		return errorStr
 	}
 
 	query := req.URL.Query()
@@ -199,18 +234,20 @@ func aiChat(session string, in string) string {
 	}
 	req.URL.RawQuery = query.Encode()
 
-	client := &http.Client{}
+	var client = &http.Client{
+		Timeout: ApiHttpTimeout,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.WithError(err).Warnln("Can't get ai api")
-		return ""
+		return errorStr
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.WithError(err).Warnln("Can't get ai api")
-		return ""
+		return errorStr
 	}
 
 	type aiRepData struct {
@@ -226,7 +263,7 @@ func aiChat(session string, in string) string {
 	json.Unmarshal(body, &arm)
 	if arm.Ret != 0 {
 		log.Warn("Ai return %s", arm.Msg)
-		return ""
+		return errorStr
 	}
 	return arm.Data.Answer
 }
@@ -242,48 +279,55 @@ func handleMsgTextNormal(reqMsg *reqMessage) []byte {
 }
 
 func caiHongPi() string {
-	resp, err := http.Get("https://chp.shadiao.app/api.php")
+	errorStr := "感觉今天不适合彩虹屁"
+	var client = &http.Client{
+		Timeout: ApiHttpTimeout,
+	}
+	resp, err := client.Get("https://chp.shadiao.app/api.php")
 	if err != nil {
 		log.WithError(err).Warnln("Can't get caihongpi")
-		return ""
+		return errorStr
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.WithError(err).Warnln("Can't read caihongpi")
-		return ""
+		return errorStr
 	}
 	return string(body)
 }
 
-func rubbish(key string) string {
+func lookupRubbish(key string) string {
+	errorStr := "暂时不认识这个垃圾哦"
 	key = strings.TrimSpace(key)
 
 	URL := "http://www.atoolbox.net/api/GetRefuseClassification.php"
 	req, err := http.NewRequest(http.MethodGet, URL, nil)
 	if err != nil {
 		log.WithError(err).Warnln("Can't make rubbish req")
-		return ""
+		return errorStr
 	}
 
 	query := req.URL.Query()
 	query.Add("key", key)
 	req.URL.RawQuery = query.Encode()
-	req.Header.Add("User-Agent", HeadAgent)
+	//req.Header.Add("User-Agent", HeadAgent)
 
-	client := &http.Client{}
+	var client = &http.Client{
+		Timeout: ApiHttpTimeout,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.WithError(err).Warnln("Can't get rubbish")
-		return ""
+		return errorStr
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.WithError(err).Warnln("Can't get rubbish resp")
-		return ""
+		return errorStr
 	}
 	if len(body) < 12 {
 		return "不认识这个哦"
@@ -314,7 +358,7 @@ func handleMsgText(reqMsg *reqMessage) []byte {
 	ctx := reqMsg.Content
 
 	if len(ctx) > 10 && ctx[:7] == "垃圾 " {
-		return makeMsgText(reqMsg, rubbish(ctx[7:]))
+		return makeMsgText(reqMsg, lookupRubbish(ctx[7:]))
 	}
 
 	switch ctx {
@@ -336,19 +380,99 @@ func handleMsgText(reqMsg *reqMessage) []byte {
 	case "彩虹屁":
 		return makeMsgText(reqMsg, caiHongPi())
 
+	case "土味":
+		return handleMsgTextTuwei(reqMsg)
+
 	default:
 		return handleMsgTextNormal(reqMsg)
 	}
 }
 
+var (
+	tuweiUrls = []string{
+		"",
+		"https://api.lovelive.tools/api/SweetNothings",
+		"http://v1.alapi.cn/api/soul?format=text",
+		"http://v1.alapi.cn/api/qinghua?type=text",
+	}
+)
+
+func tuweiLocal() string {
+	return tuweiList[rand.Intn(len(tuweiList))]
+}
+
+func handleMsgTextTuwei(reqMsg *reqMessage) []byte {
+	idx := rand.Intn(len(tuweiUrls))
+	fmt.Println(idx)
+	if idx == 0 {
+		return makeMsgText(reqMsg, tuweiLocal())
+	}
+
+	url := tuweiUrls[idx]
+	var client = &http.Client{
+		Timeout: ApiHttpTimeout,
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		log.WithError(err).Warnln("Can't get %s", url)
+		return makeMsgText(reqMsg, tuweiLocal())
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.WithError(err).Warnln("Can't read caihongpi")
+		return makeMsgText(reqMsg, tuweiLocal())
+	}
+	return makeMsgText(reqMsg, string(body))
+}
+
 func makeMsgText(reqMsg *reqMessage, content string) []byte {
 	repMsg := repMessage{
-		XMLName:      xml.Name{Local: "xml"},
 		ToUserName:   reqMsg.FromUserName,
 		FromUserName: reqMsg.ToUserName,
 		CreateTime:   time.Now().Unix(),
 		MsgType:      "text",
 		Content:      content,
+	}
+	repMsgData, err := xml.Marshal(repMsg)
+	if err != nil {
+		log.WithError(err).Warnln("Can't make msg text")
+		return nil
+	}
+	return repMsgData
+}
+
+func makeMsgImage(reqMsg *reqMessage, content string) []byte {
+	repMsg := repMessage{
+		ToUserName:   reqMsg.FromUserName,
+		FromUserName: reqMsg.ToUserName,
+		CreateTime:   time.Now().Unix(),
+		MsgType:      "image",
+		Content:      content,
+	}
+	repMsgData, err := xml.Marshal(repMsg)
+	if err != nil {
+		log.WithError(err).Warnln("Can't make msg text")
+		return nil
+	}
+	return repMsgData
+}
+
+func makeMsgArticle(reqMsg *reqMessage, title, desc, picUrl, url string) []byte {
+	article := articleContent{
+		Title:       "title",
+		Description: "Description",
+		PicUrl:      picUrl,
+		Url:         url,
+	}
+	repMsg := repMessage{
+		ToUserName:   reqMsg.FromUserName,
+		FromUserName: reqMsg.ToUserName,
+		CreateTime:   time.Now().Unix(),
+		MsgType:      "news",
+		ArticleCount: 1,
+		Articles:     []articleContent{article},
 	}
 	repMsgData, err := xml.Marshal(repMsg)
 	if err != nil {
