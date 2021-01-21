@@ -312,7 +312,7 @@ func lookupRubbish(key string) string {
 	query := req.URL.Query()
 	query.Add("key", key)
 	req.URL.RawQuery = query.Encode()
-	//req.Header.Add("User-Agent", HeadAgent)
+	req.Header.Add("User-Agent", HeadAgent)
 
 	var client = &http.Client{
 		Timeout: ApiHttpTimeout,
@@ -403,7 +403,7 @@ func tuweiLocal() string {
 
 func handleMsgTextTuwei(reqMsg *reqMessage) []byte {
 	idx := rand.Intn(len(tuweiUrls))
-	fmt.Println(idx)
+	log.Debugf("make tuwei idx %d", idx)
 	if idx == 0 {
 		return makeMsgText(reqMsg, tuweiLocal())
 	}
