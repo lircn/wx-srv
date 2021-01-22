@@ -59,16 +59,17 @@ const (
 )
 
 var (
-	msgSubscribe   = "欢迎光临！\n回复“帮助”查看帮助信息"
+	msgSubscribe   = "欢迎光临！\n回复\"帮助\"查看帮助信息"
 	msgScan        = "欢迎再次光临！\n是在哪里看到我的呢？"
 	msgUnsubscribe = "再见~ \n欢迎下次再来！"
 
-	msgHelp = `1. 回复“手气”测试手气
-2. 回复“主页”获取主页链接
-3. 回复“彩虹屁”挨夸
-4. 回复“土味”享受惊喜
-5. 回复“垃圾 xx”查询xx是什么垃圾类型
-6. 或者直接聊天~`
+	msgHelp = `1. 回复"手气"测试手气
+2. 回复"主页"获取主页链接
+3. 回复"彩虹屁"挨夸
+4. 回复"土味"享受惊喜
+5. 回复"垃圾 xx"查询xx是什么垃圾类型
+6. 回复"吃啥"获取意见，带空格和菜名"吃啥 XX"加菜
+7. 或者直接聊天~`
 	msgHome = "http://blog.zaynli.com"
 )
 
@@ -148,17 +149,14 @@ var slotMachMap = map[int32]string{
 }
 
 var tuweiList []string
+var foodList []string
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
-
 	file, err := os.Open("tuwei.db")
 	if err != nil {
 		log.WithError(err).Warnln("Failed to open tuwei")
 		return
 	}
-	defer file.Close()
-
 	br := bufio.NewReader(file)
 	for {
 		a, _, c := br.ReadLine()
@@ -167,11 +165,28 @@ func init() {
 		}
 		tuweiList = append(tuweiList, string(a))
 	}
+	file.Close()
+
+	file, err = os.Open("food.db")
+	if err != nil {
+		log.WithError(err).Warnln("Failed to open food")
+		return
+	}
+	br = bufio.NewReader(file)
+	for {
+		a, _, c := br.ReadLine()
+		if c == io.EOF {
+			break
+		}
+		foodList = append(foodList, string(a))
+	}
+	file.Close()
 }
 
 func handleMsgTextLucky(reqMsg *reqMessage) []byte {
 	var b bytes.Buffer
 
+	rand.Seed(time.Now().UnixNano())
 	coin := coinMap[rand.Int31n(2)]
 	fmt.Fprintf(&b, "硬币：%s\n", coin)
 
@@ -357,11 +372,21 @@ func lookupRubbish(key string) string {
 func handleMsgText(reqMsg *reqMessage) []byte {
 	ctx := reqMsg.Content
 
-	if len(ctx) > 10 && ctx[:7] == "垃圾 " {
-		return makeMsgText(reqMsg, lookupRubbish(ctx[7:]))
+	key := "垃圾 "
+	if len(ctx) > len(key) && ctx[:len(key)] == key {
+		return makeMsgText(reqMsg, lookupRubbish(ctx[len(key):]))
+	}
+
+	key = "吃啥"
+	if len(ctx) >= len(key) && ctx[:len(key)] == key {
+		return handleMsgTextFood(reqMsg)
 	}
 
 	switch ctx {
+	case "？":
+		fallthrough
+	case "?":
+		fallthrough
 	case "帮助":
 		fallthrough
 	case "help":
@@ -398,10 +423,22 @@ var (
 )
 
 func tuweiLocal() string {
+	rand.Seed(time.Now().UnixNano())
 	return tuweiList[rand.Intn(len(tuweiList))]
 }
 
+func foodLocal() string {
+	rand.Seed(time.Now().UnixNano())
+	str := "总菜单:"
+	for _, v := range foodList {
+		str += v + ","
+	}
+	str += "选中了:\n" + foodList[rand.Intn(len(foodList))]
+	return str
+}
+
 func handleMsgTextTuwei(reqMsg *reqMessage) []byte {
+	rand.Seed(time.Now().UnixNano())
 	idx := rand.Intn(len(tuweiUrls))
 	log.Debugf("make tuwei idx %d", idx)
 	if idx == 0 {
@@ -425,6 +462,35 @@ func handleMsgTextTuwei(reqMsg *reqMessage) []byte {
 		return makeMsgText(reqMsg, tuweiLocal())
 	}
 	return makeMsgText(reqMsg, string(body))
+}
+
+func handleMsgTextFood(reqMsg *reqMessage) []byte {
+	str := reqMsg.Content
+	prefix := len("吃啥")
+
+	if len(str) == prefix {
+		return makeMsgText(reqMsg, foodLocal())
+	} else {
+		str = str[prefix:]
+		if len(str) <= 1 {
+			return makeMsgText(reqMsg, "无效菜品")
+		}
+		str = strings.Trim(str, " ")
+
+		file, err := os.OpenFile("food.db", os.O_APPEND|os.O_WRONLY, 0644)
+		defer file.Close()
+		if err != nil {
+			log.WithError(err).Warnln("Failed to open food")
+			return makeMsgText(reqMsg, "加菜失败")
+		}
+		write := bufio.NewWriter(file)
+		write.WriteString(str + "\n")
+		write.Flush()
+
+		foodList = append(foodList, str)
+
+		return makeMsgText(reqMsg, "加菜["+str+"]成功")
+	}
 }
 
 func makeMsgText(reqMsg *reqMessage, content string) []byte {
@@ -483,11 +549,7 @@ func makeMsgArticle(reqMsg *reqMessage, title, desc, picUrl, url string) []byte 
 }
 
 func test() {
-	ctx := "帮助 哈哈"
-	if ctx[:7] == "帮助 " {
-		fmt.Println("test")
-		fmt.Println(ctx[6:])
-
-	}
-	fmt.Println("test2")
+	ctx := "吃啥 hao"
+	fmt.Println(ctx)
+	fmt.Println(ctx[1:])
 }
